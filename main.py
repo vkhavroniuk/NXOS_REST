@@ -1,0 +1,20 @@
+from utils.nxosrest import NXOS
+from utils.logger import logger
+import os
+import requests
+
+
+if __name__ == '__main__':
+    requests.packages.urllib3.disable_warnings()
+
+    try:
+        IP = os.environ['SWITCH_IP']
+        username = os.environ['SWITCH_USER']
+        password = os.environ['SWITCH_PASSWORD']
+    except KeyError:
+        logger.error('Switch ENV Variables Not Found. Exiting...')
+        exit(1)
+
+    switch = NXOS(IP, username, password)
+    switch.login()
+    switch.logout()
