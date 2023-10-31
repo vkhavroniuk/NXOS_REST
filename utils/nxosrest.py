@@ -21,8 +21,8 @@ class LoginRefresher(threading.Thread):
         self._exit = True
 
 
-class NXOS:
-    """ NXOS Class """
+class NexusREST:
+    """ NexusREST Class """
     def __init__(self, ip, user, pwd):
         self.ip = ip
         self.user = user
@@ -35,9 +35,9 @@ class NXOS:
 
     def get(self, url: str):
         """ HTTP GET from Switch. Users requests.Session cookies"""
-        logger.debug(f'HTTP GET https://{self.ip}/api/{url}')
+        logger.debug(f'HTTP GET https://{self.ip}/api{url}')
         try:
-            r = self._session.get(f'https://{self.ip}/api/{url}', verify=False, timeout=10)
+            r = self._session.get(f'https://{self.ip}/api{url}', verify=False, timeout=10)
             logger.debug(f' HTTP Status Code: {r.status_code}, HTTP Response: {r.text}')
             if r.status_code != 200:
                 r.raise_for_status()
@@ -52,9 +52,9 @@ class NXOS:
 
     def post(self, url: str, data=''):
         """ HTTP Post to Switch. Users requests.Session cookies"""
-        logger.debug(f'HTTP POST https://{self.ip}/api/{url} with DATA: {data}')
+        logger.debug(f'HTTP POST https://{self.ip}/api{url} with DATA: {data}')
         try:
-            r = self._session.post(f'https://{self.ip}/api/{url}', data=data, verify=False, timeout=10)
+            r = self._session.post(f'https://{self.ip}/api{url}', data=data, verify=False, timeout=10)
             logger.debug(f' HTTP Status Code: {r.status_code}, HTTP Response: {r.text}')
             if r.status_code != 200:
                 r.raise_for_status()
@@ -79,8 +79,10 @@ class NXOS:
             return
         if r.ok:
             cookie_jar = self._session.cookies.get_dict()
+            logger.debug(f'Cookie Jar: {cookie_jar}')
             self.token = cookie_jar['APIC-cookie']
-            self.refresh_token_timeout = int(r.json()['imdata'][0]['aaaLogin']['attributes']['refreshTimeoutSeconds'])
+            token_refresh = r.json()['imdata'][0]['aaaLogin']['attributes']['refreshTimeoutSeconds']
+            self.refresh_token_timeout = int(token_refresh)
             self.is_authenticated = True
             active_threads = threading.enumerate()
             if self.login_thread not in active_threads:

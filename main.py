@@ -1,4 +1,4 @@
-from utils.nxosrest import NXOS
+from utils.nxosrest import NexusREST
 from utils.logger import logger
 import os
 import requests
@@ -15,6 +15,6 @@ if __name__ == '__main__':
         logger.error('Switch ENV Variables Not Found. Exiting...')
         exit(1)
 
-    switch = NXOS(IP, username, password)
+    switch = NexusREST(IP, username, password)
     switch.login()
     switch.logout()
