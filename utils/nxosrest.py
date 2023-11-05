@@ -67,6 +67,19 @@ class NexusREST:
             logger.error(f'HTTP Error: {e}')
             return
 
+    def get_vlans(self):
+        url = '/mo/sys.json?query-target=children&target-subtree-class=bd&rsp-subtree=full'
+        r = self.get(url)
+        if r is not None:
+            print(r.json())
+
+    def get_vrfs(self):
+        url = '/mo/sys.json?query-target=children&target-subtree-class=l3Inst&rsp-subtree=full'
+        r = self.get(url)
+        if r is not None:
+            print(r.json())
+
+
     def login(self) -> None:
         """ Login into the Switch. Get Token"""
         url = '/aaaLogin.json'
