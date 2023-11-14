@@ -18,6 +18,8 @@ if __name__ == '__main__':
     switch = NexusREST(IP, username, password)
     switch.login()
 
-    #switch.get_vlans()
-    switch.get_vrfs()
+    print(switch.get_svi())
+    print(switch.get_bd())
+    print(switch.get_vrfs())
+
     switch.logout()

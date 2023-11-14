@@ -67,18 +67,63 @@ class NexusREST:
             logger.error(f'HTTP Error: {e}')
             return
 
-    def get_vlans(self):
-        url = '/mo/sys.json?query-target=children&target-subtree-class=bd&rsp-subtree=full'
+    def get_bd(self):
+        url = '/node/class/l2BD.json?rsp-subtree=full&rsp-prop-include=set-config-only'
+        bd_dict = dict()
         r = self.get(url)
-        if r is not None:
-            print(r.json())
+        if r is None:
+            return
+        bd_list = r.json()['imdata']
+        for bd in bd_list:
+            bd_id = bd['l2BD']['attributes']['id']
+            if bd_id == '1':
+                continue
+            bd_name = bd['l2BD']['attributes']['name']
+            bd_encap = bd['l2BD']['attributes']['accEncap']
+            bd_dict[bd_id] = {'name': bd_name, 'encap': bd_encap}
+        return bd_dict
+
+# switch info /api/mo/sys.json
+# switch full conf : /api/mo/sys.json?rsp-subtree=full&rsp-prop-include=set-config-only
+
+    def get_svi(self):
+        url = '/node/class/sviIf.json?rsp-subtree=full&rsp-prop-include=set-config-only'
+        svi_dict = dict()
+        r = self.get(url)
+        if r is None:
+            return
+        svi_list = r.json()['imdata']
+        for svi in svi_list:
+            svi_descr = ''
+            svi_id = svi['sviIf']['attributes']['vlanId']
+            if svi_id == '1':
+                continue
+            if 'descr' in svi['sviIf']['attributes']:
+                svi_descr = svi['sviIf']['attributes']['descr']
+            svi_vrf = svi['sviIf']['children'][0]['nwRtVrfMbr']['attributes']['tDn']
+            svi_dict[svi_id] = {'descr': svi_descr, 'vrf': svi_vrf.split('-')[1]}
+        return svi_dict
 
     def get_vrfs(self):
-        url = '/mo/sys.json?query-target=children&target-subtree-class=l3Inst&rsp-subtree=full'
-        r = self.get(url)
-        if r is not None:
-            print(r.json())
+        """
 
+        :return: dict of vrfs: key = name, {rd:'', encap:''}
+        """
+        url = '/node/class/l3Inst.json?rsp-subtree=full&rsp-prop-include=set-config-only'
+        # url = '/mo/sys.json?query-target=children&target-subtree-class=l3Inst&rsp-subtree=full'
+        vrf_dict = dict()
+        r = self.get(url)
+        if r is None:
+            return
+        vrf_list = r.json()['imdata']
+        for vrf in vrf_list:
+            vrf_name = vrf['l3Inst']['attributes']['name']
+            if vrf_name in ['management', 'default']:
+                continue
+            vrf_encap = vrf['l3Inst']['attributes']['encap']
+            vrf_descr = vrf['l3Inst']['attributes']['descr']
+            vrf_dict[vrf_name] = {'descr': vrf_descr, 'encap': vrf_encap}
+        return vrf_dict
 
     def login(self) -> None:
         """ Login into the Switch. Get Token"""
@@ -105,7 +150,6 @@ class NexusREST:
     def refresh_token(self) -> None:
         """ Refresh auth token before timeout"""
         url = '/aaaRefresh.json'
-
         if not self.is_authenticated:
             self.login()
         else:
