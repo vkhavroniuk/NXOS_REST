@@ -21,5 +21,6 @@ if __name__ == '__main__':
     print(switch.get_svi())
     print(switch.get_bd())
     print(switch.get_vrfs())
-
+    print(switch.get_v4static('GRT'))
+    print(switch.get_v6static('GRT'))
     switch.logout()

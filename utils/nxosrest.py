@@ -68,6 +68,10 @@ class NexusREST:
             return
 
     def get_bd(self):
+        """
+        :return: {'220': {'name': 'SPT_Private_LAN220', 'encap': 'vxlan-500220'},
+                  '2309': {'name': 'Proluna_PCI_DSS_WAN', 'encap': 'vxlan-5002309'}}
+        """
         url = '/node/class/l2BD.json?rsp-subtree=full&rsp-prop-include=set-config-only'
         bd_dict = dict()
         r = self.get(url)
@@ -87,6 +91,12 @@ class NexusREST:
 # switch full conf : /api/mo/sys.json?rsp-subtree=full&rsp-prop-include=set-config-only
 
     def get_svi(self):
+        """
+
+        :return: dict with all SVIs {'VLAN_ID':{'descr':'DESCRIPTION','vrf':'VRF_NAME'}}
+        example: {'2500': {'descr': 'WAN_DIFF_2500', 'vrf': 'GRT'},
+                  '2402': {'descr': 'MGMT_chat', 'vrf': 'GRT'}}
+        """
         url = '/node/class/sviIf.json?rsp-subtree=full&rsp-prop-include=set-config-only'
         svi_dict = dict()
         r = self.get(url)
@@ -104,9 +114,68 @@ class NexusREST:
             svi_dict[svi_id] = {'descr': svi_descr, 'vrf': svi_vrf.split('-')[1]}
         return svi_dict
 
+    def get_v4static(self, vrf_name: str) -> dict:
+        """
+        function to get all ipv4 static routes for particular vrf
+        :param vrf_name: string with VRF name
+        :return: dict key = prefix: [(next_hop, name, tag), (next_hop, name, tag)]
+        """
+        url = (f'/node/mo/sys/ipv4/inst/dom-{vrf_name}.json?query-target=children&'
+               f'target-subtree-class=ipv4Route&rsp-subtree=full&rsp-prop-include=set-config-only')
+        static_dict = dict()
+        r = self.get(url)
+        if r is None:
+            return
+        static_list = r.json()['imdata']
+        for static in static_list:
+            prefix = static['ipv4Route']['attributes']['prefix']
+            next_hops = []
+            for child in static['ipv4Route']['children']:
+                if 'ipv4Nexthop' in child:
+                    rtname = ''
+                    tag = ''
+                    attr = child['ipv4Nexthop']['attributes']
+                    nhAddr = attr['nhAddr']
+                    if 'rtname' in attr:
+                        rtname = attr['rtname']
+                    if 'tag' in attr:
+                        tag = attr['tag']
+                    next_hops.append((nhAddr, rtname, tag))
+            static_dict[prefix] = next_hops
+        return static_dict
+
+    def get_v6static(self, vrf_name: str) -> dict:
+        """
+        function to get all ipv4 static routes for particular vrf
+        :param vrf_name: string with VRF name
+        :return: dict key = prefix: [(next_hop, name, tag), (next_hop, name, tag)]
+        """
+        url = (f'/node/mo/sys/ipv6/inst/dom-{vrf_name}.json?query-target=children&'
+               f'target-subtree-class=ipv6Route&rsp-subtree=full&rsp-prop-include=set-config-only')
+        static_dict = dict()
+        r = self.get(url)
+        if r is None:
+            return
+        static_list = r.json()['imdata']
+        for static in static_list:
+            prefix = static['ipv6Route']['attributes']['prefix']
+            next_hops = []
+            for child in static['ipv6Route']['children']:
+                if 'ipv6Nexthop' in child:
+                    rtname = ''
+                    tag = ''
+                    attr = child['ipv6Nexthop']['attributes']
+                    nhAddr = attr['nhAddr']
+                    if 'rtname' in attr:
+                        rtname = attr['rtname']
+                    if 'tag' in attr:
+                        tag = attr['tag']
+                    next_hops.append((nhAddr, rtname, tag))
+            static_dict[prefix] = next_hops
+        return static_dict
+
     def get_vrfs(self):
         """
-
         :return: dict of vrfs: key = name, {rd:'', encap:''}
         """
         url = '/node/class/l3Inst.json?rsp-subtree=full&rsp-prop-include=set-config-only'
@@ -168,3 +237,7 @@ class NexusREST:
         logout_url = '/aaaLogout.json'
         self.login_thread.exit()
         self.post(logout_url)
+
+
+## /api/node/mo/sys/ipv4/inst/dom-GRT.json?rsp-subtree=full&rsp-prop-include=set-config-only
+## static routes. Need to filter only static route object.
