@@ -65,7 +65,7 @@ class NexusREST:
             return
         except requests.HTTPError as e:
             logger.error(f'HTTP Error: {e}')
-            return
+            return r
 
     def get_bd(self):
         """
@@ -90,22 +90,161 @@ class NexusREST:
             bd_dict[bd_id] = {'name': bd_name, 'encap': bd_encap}
         return bd_dict
 
-    def add_bd(self, bd_id: int, vxlan_id: int, name: str):
+    def add_bd(self, bd_id: str, vxlan_id: str, name: str):
         url = f'/api/mo/sys/bd.json'
+        if not bd_id:
+            raise ValueError('bd_id not specified')
         bd = {
             "l2BD": {
                 "attributes": {
-                    "accEncap": f"vxlan-{vxlan_id}",
-                    "dn": f"sys/bd/bd-[vlan-{str(bd_id)}]",
-                    "fabEncap": f"vlan-{str(bd_id)}",
-                    "id": str(bd_id),
-                    "name": name,
+                    "fabEncap": f"vlan-{bd_id}",
                     "status": "created"
                 }
             }
         }
+        if name:
+            bd['l2BD']['attributes']['name'] = name
+        if vxlan_id:
+            bd['l2BD']['attributes']['accEncap'] = f"vxlan-{vxlan_id}"
+        post_data = json.dumps(bd)
+        r = self.post(url, post_data)
+        if r.ok:
+            logger.info(f'BD {bd_id} added to {self.ip}')
 
-    def delete_bd(self, bd_id: int):
+    def add_l2vni_rd(self, vni_id: str):
+        url = '/mo/sys/evpn.json'
+        children = [
+            {
+                "rtctrlRttP": {
+                    "attributes": {
+                        "rn": "rttp-export",
+                        "type": "export"
+                    },
+                    "children": [
+                        {
+                            "rtctrlRttEntry": {
+                                "attributes": {
+                                    "rn": "ent-[route-target:unknown:0:0]",
+                                    "rtt": "route-target:unknown:0:0"
+                                }
+                            }
+                        }
+                    ]
+                }
+            },
+            {
+                "rtctrlRttP": {
+                    "attributes": {
+                        "rn": "rttp-import",
+                        "type": "import"
+                    },
+                    "children": [
+                        {
+                            "rtctrlRttEntry": {
+                                "attributes": {
+                                    "rn": "ent-[route-target:unknown:0:0]",
+                                    "rtt": "route-target:unknown:0:0"
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        ]
+        l2vni_rd = {
+            "rtctrlL2Evpn": {
+                "attributes": {
+                    "adminSt": "enabled"
+                },
+                "children": [
+                    {
+                        "rtctrlBDEvi": {
+                            "attributes": {
+                                "encap": f'vxlan-{vni_id}',
+                                "rd": "rd:unknown:0:0"
+                            },
+                            "children": children
+                        }}]}}
+        post_data = json.dumps(l2vni_rd)
+        r = self.post(url, post_data)
+        if r.ok:
+            logger.info(f'L2 EVPN RD added for {vni_id} added to {self.ip}')
+
+    def add_vni_nve(self, vni_id: str, mcast_grp='0.0.0.0'):
+        url = '/mo/sys/eps.json'
+        nve = {
+            "nvoEps": {
+                "children": [
+                    {
+                        "nvoEp": {
+                            "attributes": {
+                                "epId": "1"
+                            },
+                            "children": [
+                                {
+                                    "nvoNws": {
+                                        "children": [
+                                            {
+                                                "nvoNw": {
+                                                    "attributes": {
+                                                        "isLegacyMode": "no",
+                                                        "suppressARP": "off",
+                                                        "mcastGroup": mcast_grp,
+                                                        "vni": vni_id
+                                                    }}}]}}]}}]}}
+        post_data = json.dumps(nve)
+        r = self.post(url, post_data)
+        if r.ok:
+            logger.info(f'VNI {vni_id} added to NVE1 on {self.ip}')
+
+    def delete_vni_nve(self, vni_id: str):
+        url = '/mo/sys/eps.json'
+        nve = {
+            "nvoEps": {
+                "children": [
+                    {
+                        "nvoEp": {
+                            "attributes": {
+                                "epId": "1"
+                            },
+                            "children": [
+                                {
+                                    "nvoNws": {
+                                        "children": [
+                                            {
+                                                "nvoNw": {
+                                                    "attributes": {
+                                                        "vni": vni_id,
+                                                        "status": "deleted"
+                                                    }}}]}}]}}]}}
+        post_data = json.dumps(nve)
+        r = self.post(url, post_data)
+        if r.ok:
+            logger.info(f'VNI {vni_id} deleted from NVE1 on {self.ip}')
+
+    def delete_l2vni_rd(self, vni_id: str):
+        url = '/mo/sys/evpn.json'
+
+        l2vni_rd = {
+            "rtctrlL2Evpn": {
+                "attributes": {
+                    "adminSt": "enabled"
+                },
+                "children": [
+                    {
+                        "rtctrlBDEvi": {
+                            "attributes": {
+                                "encap": f'vxlan-{vni_id}',
+                                "rd": "rd:unknown:0:0",
+                                "status": "deleted"
+                            }
+                        }}]}}
+        post_data = json.dumps(l2vni_rd)
+        r = self.post(url, post_data)
+        if r.ok:
+            logger.info(f'L2 EVPN RD for {vni_id} DELETED from {self.ip}')
+
+    def delete_bd(self, bd_id: str):
         url = f'/api/mo/sys/bd.json'
         bd = {
             "l2BD": {
@@ -115,6 +254,10 @@ class NexusREST:
                 }
             }
         }
+        post_data = json.dumps(bd)
+        r = self.post(url, post_data)
+        if r.ok:
+            logger.info(f'BD {bd_id} DELETED from {self.ip}')
 
 # switch info /api/mo/sys.json
 # switch full conf : /api/mo/sys.json?rsp-subtree=full&rsp-prop-include=set-config-only
@@ -143,7 +286,6 @@ class NexusREST:
             svi_dict[svi_id] = {'descr': svi_descr, 'vrf': svi_vrf.split('-')[1]}
         return svi_dict
 
-
     def add_svi(self, vlan_id: int, descr: str, vrf: str):
         url = f'/node/mo/sys/intf/svi-[vlan{str(vlan_id)}].json'
         svi_if = {"sviIf": {
@@ -166,6 +308,10 @@ class NexusREST:
             ]
         }
         }
+        post_data = json.dumps(svi_if)
+        r = self.post(url, post_data)
+        if r.ok:
+            logger.info(f'SVI {vlan_id} Added to {self.ip} (VRF: {vrf})')
 
     def delete_svi(self, vlan_id: int):
         url = f'/node/mo/sys/intf/svi-[vlan{str(vlan_id)}].json'
@@ -177,18 +323,26 @@ class NexusREST:
                 "status": "deleted"
             }}}
 
-
-    def get_all_vrfs_info(self):
+    def get_all_vrfs_info(self, afi='ipv4'):
         """
+        :param afi: address family ['ipv4', 'ipv6']
         :return: list with data for all vrfs: [{'ipv4Dom':
         {'attributes':{}, 'children'[{'ipv4Route':{},{'ipv4If':{}}]:}},{}]
         """
-        url = '/mo/sys/ipv4/inst.json?rsp-subtree=full&rsp-prop-include=set-config-only'
+        if afi not in ['ipv4', 'ipv6']:
+            raise ValueError('Address Family should be ipv4 or ipv6')
+
+        url = f'/mo/sys/{afi}/inst.json?rsp-subtree=full&rsp-prop-include=set-config-only'
         r = self.get(url)
         if r is None:
             return
-        data = r.json()['imdata'][0]['ipv4Inst']['children']
-        return data
+        inst = f'{afi}Inst'
+
+        data = r.json()['imdata'][0][inst]
+        if 'children' in data:
+            return data['children']
+        else:
+            return []
 
     def get_vrf(self):
         """
@@ -204,12 +358,53 @@ class NexusREST:
             vrf_name = vrf['l3Inst']['attributes']['name']
             if vrf_name in ['management', 'default']:
                 continue
-            vrf_encap = vrf['l3Inst']['attributes']['encap']
-            vrf_descr = vrf['l3Inst']['attributes']['descr']
+            if 'encap' in vrf['l3Inst']['attributes']:
+                vrf_encap = vrf['l3Inst']['attributes']['encap']
+            else:
+                vrf_encap = None
+            if 'descr' in vrf['l3Inst']['attributes']:
+                vrf_descr = vrf['l3Inst']['attributes']['descr']
+            else:
+                vrf_descr = None
+
             vrf_dict[vrf_name] = {'descr': vrf_descr, 'encap': vrf_encap}
         return vrf_dict
 
-    def add_vrf(self, vrf_name: str, descr: str, encap: int):
+    def _vrf_nve(self, encap: str, action: str):
+        if action not in ['created', 'deleted']:
+            raise ValueError('Select create or delete')
+        url_nve = '/mo/sys/eps.json'
+        nve = {
+            "nvoEps": {
+                "children": [
+                    {
+                        "nvoEp": {
+                            "attributes": {
+                                "epId": "1"
+                            },
+                            "children": [
+                                {
+                                    "nvoNws": {
+                                        "children": [
+                                            {
+                                                "nvoNw": {
+                                                    "attributes": {
+                                                        "associateVrfFlag": "yes",
+                                                        "isLegacyMode": "no",
+                                                        "vni": encap,
+                                                        "status": action
+                                                    }}}]}}]}}]}}
+        post_data = json.dumps(nve)
+        r = self.post(url_nve, post_data)
+
+    def associate_vrf_nve(self, encap: str):
+        self._vrf_nve(encap, 'created')
+
+    def disassociate_vrf_nve(self, encap: str):
+        self._vrf_nve(encap, 'deleted')
+
+    def add_evpn_vrf(self, vrf_name: str, descr: str, encap: str):
+        url_vrf = '/mo/sys.json'
         vrf = {
             "topSystem": {
                 "children": [{
@@ -347,8 +542,14 @@ class NexusREST:
                         ]
                     }
                 }]}}
+        post_data = json.dumps(vrf)
+        r = self.post(url_vrf, post_data)
+        if r.ok:
+            logger.info(f'VRF: {vrf_name} Added to {self.ip}')
 
-    def delete_vrf(self, vrf_name: str):
+
+    def delete_evpn_vrf(self, vrf_name: str):
+        url_vrf = '/mo/sys.json'
         vrf = {
             "topSystem": {
                 "children": [
@@ -358,6 +559,10 @@ class NexusREST:
                                 "name": f"{vrf_name}",
                                 "status": "deleted"
                             }}}]}}
+        post_data = json.dumps(vrf)
+        r = self.post(url_vrf, post_data)
+        if r.ok:
+            logger.info(f'VRF: {vrf_name} Deleted from {self.ip}')
 
     def login(self) -> None:
         """ Login into the Switch. Get Token"""
