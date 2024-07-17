@@ -356,7 +356,7 @@ class NexusREST:
         vrf_list = r.json()['imdata']
         for vrf in vrf_list:
             vrf_name = vrf['l3Inst']['attributes']['name']
-            if vrf_name in ['management', 'default']:
+            if vrf_name in ['management', 'default', 'peer-keepalive']:
                 continue
             if 'encap' in vrf['l3Inst']['attributes']:
                 vrf_encap = vrf['l3Inst']['attributes']['encap']

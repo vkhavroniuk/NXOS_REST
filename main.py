@@ -125,23 +125,23 @@ class AHNexus(NexusREST):
                     if 'static_v6' in static_yml[vrf_id]:
                         if vrf_id not in self._v6static:
                             self._v6static[vrf_id] = {}
-                    for v6route in static_yml[vrf_id]['static_v6']:
-                        nh_dict = {}
-                        nh_ip6 = v6route['nh']
-                        dst6 = v6route['dst']
-                        nhif6 = v6route['nhIf'] if 'nhIf' in v6route else 'unspecified'
-                        nh_dict['nhAddr'] = nh_ip6
-                        nh_dict['nhIf'] = nhif6
-                        if 'name' in v6route:
-                            name6 = v6route['name']
-                            nh_dict['rtname'] = name6
-                        nh_dict['nhVrf'] = vrf_id
-                        nh_dict['tag'] = tag
-                        if (self.is_ans_v6nh_resolved(vrf_id, nh_ip6) or
-                                (nhif6 != 'unspecified' and self.ans_svi_exist(nhif6[4:]))):
-                            if dst6 not in self._v6static[vrf_id]:
-                                self._v6static[vrf_id][dst6] = []
-                            self._v6static[vrf_id][dst6].append(nh_dict)
+                        for v6route in static_yml[vrf_id]['static_v6']:
+                            nh_dict = {}
+                            nh_ip6 = v6route['nh']
+                            dst6 = v6route['dst']
+                            nhif6 = v6route['nhIf'] if 'nhIf' in v6route else 'unspecified'
+                            nh_dict['nhAddr'] = nh_ip6
+                            nh_dict['nhIf'] = nhif6
+                            if 'name' in v6route:
+                                name6 = v6route['name']
+                                nh_dict['rtname'] = name6
+                            nh_dict['nhVrf'] = vrf_id
+                            nh_dict['tag'] = tag
+                            if (self.is_ans_v6nh_resolved(vrf_id, nh_ip6) or
+                                    (nhif6 != 'unspecified' and self.ans_svi_exist(nhif6[4:]))):
+                                if dst6 not in self._v6static[vrf_id]:
+                                    self._v6static[vrf_id][dst6] = []
+                                self._v6static[vrf_id][dst6].append(nh_dict)
 
     @property
     def v4static_ans(self):
@@ -164,7 +164,7 @@ class AHNexus(NexusREST):
         subnets = []
         for ipv4Dom in self._all_vrfs_v4info:
             vrf_id = ipv4Dom['ipv4Dom']['attributes']['name']
-            if vrf_id not in ['management', 'default'] and vrf_id == vrf_resolve:
+            if vrf_id not in ['management', 'default', 'peer-keepalive'] and vrf_id == vrf_resolve:
                 children = ipv4Dom['ipv4Dom']['children'] if 'children' in ipv4Dom['ipv4Dom'] else []
                 for child in children:
                     if 'ipv4If' in child:
@@ -842,10 +842,14 @@ def ansible_yalm_config_parser(config: dict, host_list: list):
                 dhcp_relay = svi['dhcp_relay']
             else:
                 dhcp_relay = 'false'
+            if 'mcast_grp' in svi:
+                mcast_grp = svi['mcast_grp']
+            else:
+                mcast_grp = '0.0.0.0'
             ipv4 = svi['ipv4'] if 'ipv4' in svi else ''
             ipv6 = svi['ipv6'] if 'ipv6' in svi else ''
             l3_vlan = {str(svi['vlan_id']): {'name': svi['name'],
-                                             'mcast_grp': svi['mcast_grp'],
+                                             'mcast_grp': mcast_grp,
                                              'vrf': svi['vrf'],
                                              'mtu': svi['mtu'],
                                              'ipv4': ipv4,
@@ -1005,6 +1009,8 @@ if __name__ == '__main__':
     loader = DataLoader()
     inventory = InventoryManager(loader=loader, sources=file_hosts)
     variable_manager = VariableManager(loader=loader, inventory=inventory)
+    # only for l2 fabrics like chats:
+    # hosts = variable_manager.get_vars()['groups']['leaf'] + variable_manager.get_vars()['groups']['bleaf']
     hosts = variable_manager.get_vars()['groups']['leaf']
     switches = dict()  # {'ansible_name': switch_object}
 
