@@ -98,6 +98,7 @@ class AHNexus(NexusREST):
                 return True
         return False
 
+
     def add_ansible_static(self, static_yml: dict):
         tag = static_yml['tag']
         for vrf_id in self.ans_vrf:
