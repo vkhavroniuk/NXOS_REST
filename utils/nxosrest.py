@@ -286,12 +286,13 @@ class NexusREST:
             svi_dict[svi_id] = {'descr': svi_descr, 'vrf': svi_vrf.split('-')[1]}
         return svi_dict
 
-    def add_svi(self, vlan_id: int, descr: str, vrf: str):
+    def add_svi(self, vlan_id: int, descr: str, vrf: str, mtu='1500'):
         url = f'/node/mo/sys/intf/svi-[vlan{str(vlan_id)}].json'
         svi_if = {"sviIf": {
             "attributes": {
                 "adminSt": "up",
                 "descr": descr,
+                "mtu": mtu,
                 "dn": f"sys/intf/svi-[vlan{str(vlan_id)}]",
                 "id": f"vlan{str(vlan_id)}",
                 "vlanId": str(vlan_id)
@@ -322,6 +323,10 @@ class NexusREST:
                 "vlanId": str(vlan_id),
                 "status": "deleted"
             }}}
+        post_data = json.dumps(svi_if)
+        r = self.post(url, post_data)
+        if r.ok:
+            logger.info(f'SVI {vlan_id} Deleted')
 
     def get_all_vrfs_info(self, afi='ipv4'):
         """

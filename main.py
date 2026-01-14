@@ -11,6 +11,7 @@ import ipaddress as ip
 from queue import Queue
 from threading import Thread
 import json
+import argparse
 
 
 class AHNexus(NexusREST):
@@ -108,7 +109,7 @@ class AHNexus(NexusREST):
                     for v4route in static_yml[vrf_id]['static_v4']:
                         nh_dict = {}
                         nh_ip = v4route['nh']
-                        nhif = v4route['nhIf'] if 'nhIf' in v4route else 'unspecified'
+                        nhif = v4route['nhIf'].lower() if 'nhIf' in v4route else 'unspecified'
                         nh_dict['nhAddr'] = nh_ip
                         nh_dict['nhIf'] = nhif
                         dst = v4route['dst']
@@ -129,7 +130,7 @@ class AHNexus(NexusREST):
                             nh_dict = {}
                             nh_ip6 = v6route['nh']
                             dst6 = v6route['dst']
-                            nhif6 = v6route['nhIf'] if 'nhIf' in v6route else 'unspecified'
+                            nhif6 = v6route['nhIf'].lower() if 'nhIf' in v6route else 'unspecified'
                             nh_dict['nhAddr'] = nh_ip6
                             nh_dict['nhIf'] = nhif6
                             if 'name' in v6route:
@@ -775,6 +776,22 @@ class AHNexus(NexusREST):
             return f'VRF_{name}'
         return None
 
+    def get_ans_svi_vrf(self, svi_id: str):
+        if not self.ansible_config:
+            return None
+        if svi_id in self.ansible_config['l3_vlans']:
+            vrf = self.ansible_config['l3_vlans'][svi_id]['vrf']
+            return vrf
+        return None
+
+    def get_ans_svi_mtu(self, svi_id: str):
+        if not self.ansible_config:
+            return None
+        if svi_id in self.ansible_config['l3_vlans']:
+            mtu = self.ansible_config['l3_vlans'][svi_id]['mtu']
+            return mtu
+        return None
+
     @property
     def new_svi(self):
         """
@@ -822,13 +839,17 @@ def ansible_yalm_config_parser(config: dict, host_list: list):
     # parse ansible var file for layer2 VLAN
     if 'l2_vlans' in config and config['l2_vlans']:
         for vlan in config['l2_vlans']:
+            vlan_id = str(vlan['vlan_id'])
             if 'mcast_grp' in vlan:
                 mcast_grp = vlan['mcast_grp']
             else:
                 mcast_grp = '0.0.0.0'
-            l2_vlan = {str(vlan['vlan_id']): {'name': vlan['name'],
-                                              'mcast_grp': mcast_grp
-                                              }}
+            if 'vni' in vlan:
+                vni = vlan['vni']
+            else:
+                vni = ENCAP_PREFIX + vlan_id
+            l2_vlan = {vlan_id: {'name': vlan['name'], 'mcast_grp': mcast_grp, 'vni': vni}}
+
             for host in vlan['deploy_to']:
                 if host == 'all':
                     deploy_to_all['l2_vlans'].update(l2_vlan)
@@ -838,6 +859,7 @@ def ansible_yalm_config_parser(config: dict, host_list: list):
     # parse ansible var file for layer3 SVI
     if 'l3_vlans' in config and config['l3_vlans']:
         for svi in config['l3_vlans']:
+            svi_id = str(svi['vlan_id'])
             if 'dhcp_relay' in svi:
                 dhcp_relay = svi['dhcp_relay']
             else:
@@ -846,12 +868,17 @@ def ansible_yalm_config_parser(config: dict, host_list: list):
                 mcast_grp = svi['mcast_grp']
             else:
                 mcast_grp = '0.0.0.0'
+            if 'vni' in svi:
+                vni = svi['vni']
+            else:
+                vni = ENCAP_PREFIX + svi_id
             ipv4 = svi['ipv4'] if 'ipv4' in svi else ''
             ipv6 = svi['ipv6'] if 'ipv6' in svi else ''
-            l3_vlan = {str(svi['vlan_id']): {'name': svi['name'],
+            mtu = svi['mtu'] if 'mtu' in svi else '1500'
+            l3_vlan = {svi_id: {'name': svi['name'],
                                              'mcast_grp': mcast_grp,
                                              'vrf': svi['vrf'],
-                                             'mtu': svi['mtu'],
+                                             'mtu': mtu,
                                              'ipv4': ipv4,
                                              'ipv6': ipv6,
                                              'dhcp_relay': dhcp_relay
@@ -914,51 +941,82 @@ def thread_worker(queue):
         node = queue.get()
         node.login()
 
-        if node.new_bd:
-            print(f'Node: {node.name:25} New VLAN:', node.new_bd)
-            for bd in node.new_bd:
-                bd_id = bd
-                bd_name = node.get_ans_bd_name(bd)
-                bd_ecap = ENCAP_PREFIX + bd
-                bd_mcast_grp = node.get_ans_bd_mcast(bd)
-                if not bd_mcast_grp:
-                    bd_mcast_grp = '0.0.0.0'
-                if not node.warning_only:
-                    node.add_bd(bd_id, bd_ecap, bd_name)
-                    node.add_l2vni_rd(bd_ecap)
-                    node.add_vni_nve(bd_ecap, bd_mcast_grp)
-                else:
-                    logger.info(f'Node: {node.name:25} Warning Only Mode! Adding Layer2 '
-                                f'{bd_id} {bd_name} with VNI: {bd_ecap}')
-        if node.new_svi:
-            print(f'Node: {node.name:25} New SVI:', node.new_svi)
+        if args.mode == 'add':
 
-        if node.rem_svi:
-            print(f'Node: {node.name:25} Delete SVI:', node.rem_svi)
+            if node.new_vrf:
+                for vrf_name in node.new_vrf:
+                    vrf_bd_id = node.get_ans_vrf_bd(vrf_name)
+                    vrf_descr = node.get_ans_vrf_desc(vrf_name)
+                    bd_ecap = ENCAP_PREFIX + vrf_bd_id
+                    bd_name = node.get_ans_bd_name(vrf_bd_id)
+
+                    if not node.warning_only:
+                        node.add_bd(vrf_bd_id, bd_ecap, bd_name)
+                        node.add_evpn_vrf(vrf_name, vrf_descr, bd_ecap)
+                        node.associate_vrf_nve(bd_ecap)
+                        svi_desc = node.get_ans_svi_name(vrf_bd_id)
+                        node.add_svi(vrf_bd_id, svi_desc, vrf_name, '9216')
+                        print(f'Node: {node.name:25} New VRF Added:', node.new_vrf)
+                    else:
+                        logger.info(f'Node: {node.name:25} Warning Only Mode! Adding VRF '
+                                    f'{vrf_name}. Desc: {vrf_descr}. Encap {bd_ecap} with VNI: {bd_name}')
+
+            if node.new_bd:
+                print(f'Node: {node.name:25} New VLAN:', node.new_bd)
+                for bd in node.new_bd:
+                    bd_id = bd
+                    bd_name = node.get_ans_bd_name(bd)
+                    bd_ecap = ENCAP_PREFIX + bd
+                    bd_mcast_grp = node.get_ans_bd_mcast(bd)
+                    if not bd_mcast_grp:
+                        bd_mcast_grp = '0.0.0.0'
+
+                    if not node.warning_only:
+                        node.add_bd(bd_id, bd_ecap, bd_name)
+                        node.add_l2vni_rd(bd_ecap)
+                        node.add_vni_nve(bd_ecap, bd_mcast_grp)
+                    else:
+                        logger.info(f'Node: {node.name:25} Warning Only Mode! Adding Layer2 '
+                                    f'{bd_id} {bd_name} with VNI: {bd_ecap}')
+            if node.new_svi:
+                for svi in node.new_svi:
+                    svi_id = svi
+                    svi_desc = node.get_ans_svi_name(svi_id)
+                    svi_vrf = node.get_ans_svi_vrf(svi_id)
+                    svi_mtu = node.get_ans_svi_mtu(svi_id)
+                    if not node.warning_only:
+                        node.add_svi(svi_id, svi_desc, svi_vrf, svi_mtu)
+                    else:
+                        logger.info(f'Node: {node.name:25} Warning Only Mode! Adding Layer2 '
+                                    f'{svi_id} in VRF: {svi_vrf}')
+        if args.mode == 'delete':
+            if node.rem_svi:
+                print(f'Node: {node.name:25} Delete SVI:', node.rem_svi)
+
+            if node.rem_vrf:
+                print(f'Node: {node.name:25} Delete VRF:', node.rem_vrf)
+
+            if node.rem_bd:
+                print(f'Node: {node.name:25} Delete VLAN:', node.rem_bd)
+                for bd in node.rem_bd:
+                    bd_id = bd
+                    bd_ecap = ENCAP_PREFIX + bd
+                    if not node.warning_only:
+                        node.delete_vni_nve(bd_ecap)
+                        node.delete_l2vni_rd(bd_ecap)
+                        node.delete_bd(bd_id)
+                    else:
+                        logger.info(f'Node: {node.name:25} Warning Only Mode! Deleting Layer2 '
+                                    f'{bd_id} with VNI: {bd_ecap}')
+
+
+
         if node.update_svi:
             print(f'Node: {node.name:25} Update SVI:', node.update_svi)
-
-        if node.rem_bd:
-            print(f'Node: {node.name:25} Delete VLAN:', node.rem_bd)
-
-            for bd in node.rem_bd:
-                bd_id = bd
-                bd_ecap = ENCAP_PREFIX + bd
-                if not node.warning_only:
-                    node.delete_vni_nve(bd_ecap)
-                    node.delete_l2vni_rd(bd_ecap)
-                    node.delete_bd(bd_id)
-                else:
-                    logger.info(f'Node: {node.name:25} Warning Only Mode! Deleting Layer2 '
-                                f'{bd_id} with VNI: {bd_ecap}')
 
         if node.update_bd:
             print(f'Node: {node.name:25} Update VLAN:', node.update_bd)
 
-        if node.new_vrf:
-            print(f'Node: {node.name:25} New VRF:', node.new_vrf)
-        if node.rem_vrf:
-            print(f'Node: {node.name:25} Delete VRF:', node.rem_vrf)
         if node.update_vrf:
             print(f'Node: {node.name:25} Update VRF:', node.update_vrf)
 
@@ -968,22 +1026,28 @@ def thread_worker(queue):
         # node.v4delete_unresolved()
         # node.v6delete_unresolved()
 
-        if node.new_v4static:
-            node.v4add_static(node.new_v4static)
-        if node.rem_v4static:
-            node.v4delete_static(node.rem_v4static)
+        if args.mode == 'static':
+            if node.new_v4static:
+                node.v4add_static(node.new_v4static)
+            if node.rem_v4static:
+                node.v4delete_static(node.rem_v4static)
 
-        if node.new_v6static:
-            node.v6add_static(node.new_v6static)
-
-        if node.rem_v6static:
-            node.v6delete_static(node.rem_v6static)
+            if node.new_v6static:
+                node.v6add_static(node.new_v6static)
+            if node.rem_v6static:
+                node.v6delete_static(node.rem_v6static)
 
         queue.task_done()
 
 
 if __name__ == '__main__':
     requests.packages.urllib3.disable_warnings()
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('-m', "--mode", type=str, required=True, choices={'static', 'add', 'delete'},
+                        help='Running mode: static routes, adding things, deleting things')
+    args = parser.parse_args()
+
 
     try:
         username = os.environ['SSH_USER_ID']
